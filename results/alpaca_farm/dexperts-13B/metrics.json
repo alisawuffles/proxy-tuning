@@ -1,0 +1,10 @@
+{
+    "win_rate": 83.35403726708076,
+    "standard_error": 1.3136805034546837,
+    "n_wins": 671,
+    "n_wins_base": 134,
+    "n_draws": 0,
+    "n_total": 805,
+    "mode": "community",
+    "avg_length": 1976
+}

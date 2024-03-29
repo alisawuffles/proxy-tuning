@@ -1,6 +1,6 @@
 import torch
 from tqdm import tqdm
-from eval.utils import load_hf_lm_and_tokenizer, load_dexperts_model_and_tokenizer
+from eval.utils import load_lm_and_tokenizer, load_dexperts_model_and_tokenizer
 from eval.templates import create_prompt_with_llama2_chat_format
 from transformers import LogitsProcessorList, MinNewTokensLengthLogitsProcessor
 import argparse
@@ -12,7 +12,7 @@ import numpy as np
 def main(args):
     if args.setting == 'tuned':
         model_name = f'meta-llama/Llama-2-{args.size}b-chat-hf'
-        model, tokenizer = load_hf_lm_and_tokenizer(
+        model, tokenizer = load_lm_and_tokenizer(
             model_name_or_path=model_name,
             tokenizer_name_or_path=model_name,
             device_map='balanced',

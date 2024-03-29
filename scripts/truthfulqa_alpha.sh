@@ -1,4 +1,4 @@
-
+# Analysis with DExperts alpha
 echo "alpha=$alpha"
 size=13
 python -m eval.truthfulqa.run_eval \

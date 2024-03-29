@@ -1,27 +1,35 @@
 import torch
 from tqdm import tqdm
-import pickle
 import pandas as pd
 from eval.utils import load_dexperts_model_and_tokenizer
+from analysis.utils import flatten_batch_results, summarize_results
 
 
-def get_equation_lhs_rhs_indices(token_list):
-    equal_indices = [i for i, x in enumerate(token_list) if x == '=']
+def get_equation_lhs_rhs_indices(tokens):
+    """
+    Returns two lists of indices, one for tokens in the LHS of equations and one for those in the RHS.
+
+    Args:
+        tokens: list of str
+    """
+    equal_indices = [i for i, x in enumerate(tokens) if x == '=']
     lhs_idx, rhs_idx = [], []
 
     for equal_idx in equal_indices:
         # go left until it's no longer a number or symbol
         left_idx, right_idx = equal_idx - 1, equal_idx + 1
         while True:
-            if left_idx < 0 or not (token_list[left_idx].isdigit() or token_list[left_idx] in ",$€+-x*/"):
+            if left_idx < 0 or not (tokens[left_idx].isdigit() or tokens[left_idx] in ",$€+-x*/"):
                 break
+            lhs_idx.append(left_idx)
             left_idx -= 1
 
         # go right until it's no longer a number or symbol
         while True:
-            if right_idx >= len(token_list) or \
-                 not (token_list[right_idx].isdigit() or token_list[right_idx] in ",$€+-x*/"):
+            if right_idx >= len(tokens) or \
+                 not (tokens[right_idx].isdigit() or tokens[right_idx] in ",$€+-x*/"):
                 break
+            rhs_idx.append(right_idx)
             right_idx += 1
 
     return lhs_idx, rhs_idx
@@ -44,42 +52,27 @@ def main():
     prompts = [prompt_prefix + 'Question: ' + row['question'].strip() + '\nAnswer:' for _, row in gsm_df.iterrows()]
 
     # get token probabilities
-    batch_size = 32
-    batched_results = []
+    batch_size = 16
+    all_results = []
     for i in tqdm(range(0, len(prompts), batch_size), desc="Batches"):
         batch_prompts = prompts[i: i + batch_size]
         batch_inputs = tokenizer(batch_prompts, return_tensors='pt', padding='longest')
         input_ids = batch_inputs.input_ids.cuda()
         attention_mask = batch_inputs.attention_mask.cuda()
-        results = model.get_probs_for_analysis(
+        _, results = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
             max_new_tokens=512,
-            do_sample=False
+            do_sample=False,
+            return_logits_for_analysis=True
         )
-        batched_results.append(results)
 
-    # flatten batch results into a list of results for each prompt
-    all_results = []
-    for batch in batched_results:
-        this_batch_size = len(batch['token'][0])
-        for i in range(this_batch_size):
-            ex = {}
-            ex['token'] = [x[i] for x in batch['token']]
-            if '</s>' in ex['token']:
-                output_len = ex['token'].index('</s>')
-            else:
-                output_len = len(ex['token'])
-            ex['token'] = ex['token'][:output_len]
-            for k in batch.keys():
-                if k != 'token':
-                    ex[k] = batch[k][i, :].tolist()[:output_len]
-            all_results.append(ex)
+        # flatten batch results into a list of results for each prompt
+        results = flatten_batch_results(results)
+        shortened_results = summarize_results(results)
+        all_results.extend(shortened_results)
 
-    # save as pickle
-    with open('analysis/gsm_token_probs.pkl', 'wb') as fo:
-        pickle.dump(all_results, fo)
-    print('Results saved to analysis/gsm_token_probs.pkl', flush=True)
+    torch.save(all_results, 'analysis/pkl/gsm_analysis.pkl')
 
 
 if __name__ == "__main__":

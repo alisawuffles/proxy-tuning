@@ -3,11 +3,10 @@ import os
 import re
 import json
 import random
-import torch
 import evaluate
 from eval.utils import (
     generate_completions,
-    load_hf_lm_and_tokenizer,
+    load_lm_and_tokenizer,
     load_dexperts_model_and_tokenizer,
     dynamic_import_function,
     ensure_dir
@@ -74,11 +73,10 @@ def main(args):
 
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
-        model, tokenizer = load_hf_lm_and_tokenizer(
+        model, tokenizer = load_lm_and_tokenizer(
             model_name_or_path=args.model_name_or_path,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             load_in_8bit=args.load_in_8bit,
-            device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
     elif args.base_model_name_or_path:
@@ -183,7 +181,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_model_name_or_path",
         type=str,
-        default='meta-llama/Llama-2-13b-chat-hf',
+        default='meta-llama/Llama-2-13b-hf',
     )
     parser.add_argument(
         "--expert_model_name_or_path",

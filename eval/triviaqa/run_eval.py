@@ -7,7 +7,7 @@ import json
 from eval.utils import (
     ensure_dir,
     generate_completions,
-    load_hf_lm_and_tokenizer,
+    load_lm_and_tokenizer,
     load_dexperts_model_and_tokenizer,
 )
 
@@ -21,7 +21,7 @@ def main(args):
 
     if args.model_name_or_path:
         print("Loading model and tokenizer...")
-        model, tokenizer = load_hf_lm_and_tokenizer(
+        model, tokenizer = load_lm_and_tokenizer(
             model_name_or_path=args.model_name_or_path,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             load_in_8bit=args.load_in_8bit,
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--expert_model_name_or_path",
         type=str,
-        default='UW/llama2-7b-triviaqa',
+        default='models/llama2-triviaqa-7b',
     )
     args = parser.parse_args()
 

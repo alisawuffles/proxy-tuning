@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from eval.utils import (
     generate_completions,
-    load_hf_lm_and_tokenizer,
+    load_lm_and_tokenizer,
     load_dexperts_model_and_tokenizer
 )
 from eval.utils import dynamic_import_function
@@ -74,18 +74,17 @@ def main(args):
 
     if args.model_name_or_path:  # single HuggingFace model
         print("Loading model and tokenizer for generations...")
-        model, tokenizer = load_hf_lm_and_tokenizer(
+        model, tokenizer = load_lm_and_tokenizer(
             model_name_or_path=args.model_name_or_path,
-            tokenizer_name_or_path=args.tokenizer_name_or_path if args.model_name_or_path else args.model_name_or_path,
+            tokenizer_name_or_path=args.tokenizer_name_or_path,
             load_in_8bit=args.load_in_8bit,
-            device_map="balanced_low_0" if torch.cuda.device_count() > 1 else "auto",
             use_fast_tokenizer=not args.use_slow_tokenizer,
         )
     elif args.base_model_name_or_path:    # DExperts
         print("Loading DExperts model and tokenizer for generations...")
         model, tokenizer = load_dexperts_model_and_tokenizer(
-            args.base_model_name_or_path,
-            args.expert_model_name_or_path,
+            base_model_name_or_path=args.base_model_name_or_path,
+            expert_model_name_or_path=args.expert_model_name_or_path,
             system_prompt=args.system_prompt,
             alpha=args.alpha,
             load_in_8bit=args.load_in_8bit,
@@ -184,12 +183,6 @@ if __name__ == "__main__":
         help="batch size to use for toxicity classifier.",
     )
     parser.add_argument(
-        "--classifier_device",
-        type=str,
-        default="cuda",
-        help="device to use for toxicity classifier.",
-    )
-    parser.add_argument(
         "--load_in_8bit",
         action="store_true",
         help="load model in 8bit mode, which will reduce memory and speed up inference.",
@@ -197,7 +190,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--base_model_name_or_path",
         type=str,
-        default='meta-llama/Llama-2-13b-chat-hf',
+        default='meta-llama/Llama-2-13b-hf',
     )
     parser.add_argument(
         "--expert_model_name_or_path",

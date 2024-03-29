@@ -7,11 +7,12 @@ import math
 import os
 import random
 import datasets
+from datetime import timedelta
 import torch
 from functools import partial
 from accelerate import Accelerator
 from accelerate.logging import get_logger
-from accelerate.utils import set_seed
+from accelerate.utils import set_seed, InitProcessGroupKwargs
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -223,6 +224,12 @@ def parse_args():
         action='store_true',
         help='Use 8bit optimizer from bitsandbytes. Not compatible with deepspeed (use deepspeed config instead).',
     )
+    parser.add_argument(
+        '--timeout',
+        type=int,
+        default=1800,
+        help='Timeout for the training process. Useful if tokenization process is long. Default is 1800 seconds (30 minutes).',
+    )
     args = parser.parse_args()
 
     # Sanity checks
@@ -328,14 +335,18 @@ def save_with_accelerate(accelerator, model, tokenizer, output_dir, args):
     # Also, accelerator needs to use the wrapped model to get the state_dict.
     state_dict = accelerator.get_state_dict(model)
     if args.use_lora:
-        # When using lora, the unwrapped model is a PeftModel, which doesn't support the is_main_process 
+        # When using lora, the unwrapped model is a PeftModel, which doesn't support the is_main_process
         # and has its own save_pretrained function for only saving lora modules.
         # We have to manually specify the is_main_process outside the save_pretrained function.
         if accelerator.is_main_process:
-            unwrapped_model.save_pretrained(output_dir, state_dict=state_dict)
+            unwrapped_model.save_pretrained(output_dir, state_dict=state_dict, safe_serialization=False)
     else:
         unwrapped_model.save_pretrained(
-            output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save, state_dict=state_dict
+            output_dir,
+            is_main_process=accelerator.is_main_process,
+            save_function=accelerator.save,
+            state_dict=state_dict,
+            safe_serialization=False
         )
 
 
@@ -351,7 +362,15 @@ def main():
         accelerator_log_kwargs["log_with"] = args.report_to
         accelerator_log_kwargs["project_dir"] = args.output_dir
 
-    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, **accelerator_log_kwargs)
+    # if you get timeouts (e.g. due to long tokenization) increase this.
+    timeout_kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=args.timeout))
+
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.gradient_accumulation_steps, 
+        **accelerator_log_kwargs,
+        kwargs_handlers=[timeout_kwargs]
+    )
+
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -475,10 +494,10 @@ def main():
 
         logger.info("Initializing LORA model...")
         peft_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM, 
-            inference_mode=False, 
-            r=args.lora_rank, 
-            lora_alpha=args.lora_alpha, 
+            task_type=TaskType.CAUSAL_LM,
+            inference_mode=False,
+            r=args.lora_rank,
+            lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
             target_modules=["q_proj", "o_proj", "v_proj", "k_proj", "gate_proj", "up_proj", "down_proj"]
         )
@@ -666,7 +685,7 @@ def main():
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
-                outputs = model(**batch, use_cache=False)                
+                outputs = model(**batch, use_cache=False)       
                 loss = outputs.loss
                 # We keep track of the loss at each logged step
                 total_loss += loss.detach().float()
@@ -684,7 +703,7 @@ def main():
                 completed_steps += 1
                 if args.logging_steps and completed_steps % args.logging_steps == 0:
                     avg_loss = accelerator.gather(total_loss).mean().item() / args.gradient_accumulation_steps / args.logging_steps
-                    # logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
+                    logger.info(f"  Step: {completed_steps}, LR: {lr_scheduler.get_last_lr()[0]}, Loss: {avg_loss}")
                     if args.with_tracking:
                         accelerator.log(
                             {

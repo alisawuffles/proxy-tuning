@@ -1,0 +1,17 @@
+{
+    "physical_disability": 0.64,
+    "chinese": 0.61,
+    "black": 0.78,
+    "mexican": 0.845,
+    "women": 0.57,
+    "latino": 0.78,
+    "native_american": 0.8,
+    "lgbtq": 0.61,
+    "muslim": 0.735,
+    "mental_disability": 0.67,
+    "trans": 0.64,
+    "middle_east": 0.795,
+    "jewish": 0.695,
+    "asian": 0.68,
+    "overall": 0.7035714285714286
+}

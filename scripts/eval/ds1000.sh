@@ -16,8 +16,8 @@ python -m eval.ds1000.run_inference \
 size=13
 temperature=0.8
 python -m eval.ds1000.run_inference \
---save_dir results/ds1000/llama2-${size}B-t$temperature \
     --model_name_or_path meta-llama/Llama-2-${size}b-hf \
+    --save_dir results/ds1000/llama2-${size}B-t$temperature \
     --temperature $temperature \
     --eval_batch_size 8 \
     --max_examples 200 \
@@ -25,12 +25,12 @@ python -m eval.ds1000.run_inference \
 
 
 # Evaluating CodeLlama
-size=13
+size=70
 temperature=0.8
-echo "Results dir: results/ds1000/codellama2-${size}B-t$temperature"
+echo "Results dir: results/ds1000/codellama-${size}B-t$temperature"
 python -m eval.ds1000.run_inference \
-    --save_dir results/ds1000/codellama-${size}B-t$temperature \
     --model_name_or_path codellama/CodeLlama-${size}b-Python-hf \
+    --save_dir results/ds1000/codellama-${size}B-t$temperature \
     --temperature $temperature \
     --eval_batch_size 8 \
     --max_examples 200 \

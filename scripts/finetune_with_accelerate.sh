@@ -10,7 +10,7 @@ GRADIENT_ACC_STEPS=$(($TOTAL_BATCH_SIZE/$NUM_GPUS/$BATCH_SIZE_PER_GPU))
 echo "Training llama model ${MODEL_SIZE}b using $NUM_GPUS GPUs, $BATCH_SIZE_PER_GPU batch size per GPU, $GRADIENT_ACC_STEPS gradient accumulation steps"
 echo "Output dir: ${MODEL_NAME}"
 
-export MASTER_PORT=29502
+export MASTER_PORT=29504
 
 accelerate launch \
     --mixed_precision bf16 \
@@ -20,8 +20,8 @@ accelerate launch \
     --deepspeed_config_file open_instruct/ds_configs/stage3_no_offloading_accelerate.conf \
     open_instruct/finetune.py \
     --model_name_or_path meta-llama/Llama-2-${MODEL_SIZE}b-hf \
-    --use_flash_attn \
     --tokenizer_name meta-llama/Llama-2-${MODEL_SIZE}b-hf \
+    --use_flash_attn \
     --use_slow_tokenizer \
     --train_file $TRAIN_FILE \
     --max_seq_length 2048 \
@@ -34,7 +34,7 @@ accelerate launch \
     --weight_decay 0. \
     --num_train_epochs $NUM_EPOCHS \
     --checkpointing_steps epoch \
+    --logging_steps 1 \
     --output_dir $MODEL_NAME \
     --with_tracking \
-    --report_to tensorboard \
-    --logging_steps 1
+    --report_to wandb

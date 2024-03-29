@@ -1,8 +1,8 @@
 import torch
 from tqdm import tqdm
-import pickle
 import pandas as pd
 from eval.utils import load_dexperts_model_and_tokenizer
+from analysis.utils import flatten_batch_results, summarize_results
 
 
 @torch.inference_mode()
@@ -21,41 +21,27 @@ def main():
     prompts = [row['Question'] + '\n\nAnswer:' for _, row in truthfulqa_df.iterrows()]
 
     # get token probabilities
-    batch_size = 16
-    batched_results = []
+    batch_size = 32
+    all_results = []
     for i in tqdm(range(0, len(prompts), batch_size), desc="Batches"):
         batch_prompts = prompts[i: i + batch_size]
         batch_inputs = tokenizer(batch_prompts, return_tensors='pt', padding='longest')
         input_ids = batch_inputs.input_ids.cuda()
         attention_mask = batch_inputs.attention_mask.cuda()
-        results = model.get_probs_for_analysis(
+        _, results = model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
             max_new_tokens=512,
-            do_sample=False
+            do_sample=False,
+            return_logits_for_analysis=True
         )
-        batched_results.append(results)
 
-    # flatten batch results into a list of results for each prompt
-    all_results = []
-    for batch in batched_results:
-        this_batch_size = len(batch['token'][0])
-        for i in range(this_batch_size):
-            ex = {}
-            ex['token'] = [x[i] for x in batch['token']]
-            if '</s>' in ex['token']:
-                output_len = ex['token'].index('</s>')
-            else:
-                output_len = len(ex['token'])
-            ex['token'] = ex['token'][:output_len]
-            for k in batch.keys():
-                if k != 'token':
-                    ex[k] = batch[k][i, :].tolist()[:output_len]
-            all_results.append(ex)
+        # flatten batch results into a list of results for each prompt
+        results = flatten_batch_results(results)
+        shortened_results = summarize_results(results)
+        all_results.extend(shortened_results)
 
-    # save as pickle
-    with open('analysis/truthfulqa_token_probs.pkl', 'wb') as fo:
-        pickle.dump(all_results, fo)
+    torch.save(all_results, 'analysis/pkl/truthfulqa_analysis.pkl')
 
 
 if __name__ == "__main__":

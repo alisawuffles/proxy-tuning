@@ -8,7 +8,7 @@ import openai
 from constants import AI2_OPENAI_API_KEY
 from eval.truthfulqa.metrics import run_end2end_GPT3
 from eval.utils import (
-    load_hf_lm_and_tokenizer,
+    load_lm_and_tokenizer,
     load_dexperts_model_and_tokenizer,
     generate_completions,
     dynamic_import_function,
@@ -35,9 +35,7 @@ def trim_answer(answer):
     return answer
 
 
-def run_hf_model(
-    test_df, model, tokenizer, batch_size=1, max_new_tokens=50
-):
+def run_open_eval(test_df, model, tokenizer, batch_size, max_new_tokens):
     """Stores answers from autoregressive HF models (GPT-2, GPT-Neo)"""
     prompts = []
     for _, row in test_df.iterrows():
@@ -95,7 +93,7 @@ def run_hf_model(
     return test_df
 
 
-def run_hf_model_mc(test_df, model, tokenizer, batch_size=1):
+def run_mc_eval(test_df, model, tokenizer, batch_size):
     """Runs multiple-choice metrics for autoregressive HuggingFace models (GPT-2, GPT-Neo)"""
     prompts = []
     answer_idxs = []
@@ -140,14 +138,17 @@ def run_hf_model_mc(test_df, model, tokenizer, batch_size=1):
     # get the metrics
     parsed_outputs = []
     for i, row in test_df.iterrows():
-        # since we use period '.' as stop token, interpret last char as answer
         o = row['mc_output']
+
+        # remove strings that sometimes appear before the answer option
         to_remove = ['(', '\\begin{blockquote}', '\\begin{code}', '<blockquote>', ' **', '>', '```\n']
         for r in to_remove:
             o = o.replace(r, '')
-        o = o.strip()
+        o = o.lstrip()
+
+        # interpret first character as prediction
         if o and o[0] in CHOICES:  # o is not empty string
-            parsed_output = o[0]  # use first char as prediction
+            parsed_output = o[0]
         else:
             parsed_output = ''
 
@@ -199,7 +200,7 @@ def main(args):
     # load individual HF models
     if args.model_name_or_path:
         print("Loading HF model and tokenizer...")
-        model, tokenizer = load_hf_lm_and_tokenizer(
+        model, tokenizer = load_lm_and_tokenizer(
             model_name_or_path=args.model_name_or_path,
             tokenizer_name_or_path=args.tokenizer_name_or_path,
             load_in_8bit=args.load_in_8bit,
@@ -220,8 +221,8 @@ def main(args):
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
         print("Running generations!")
-        run_hf_model(
-            test_df, model, tokenizer, batch_size=args.eval_batch_size, max_new_tokens=500
+        run_open_eval(
+            test_df, model, tokenizer, batch_size=args.eval_batch_size, max_new_tokens=512
         )
     if 'mc' in args.settings:
         if args.base_model_name_or_path:
@@ -236,7 +237,7 @@ def main(args):
                 use_fast_tokenizer=not args.use_slow_tokenizer,
             )
         print("Running multiple-choice classification!")
-        run_hf_model_mc(
+        run_mc_eval(
             test_df, model, tokenizer, batch_size=args.eval_batch_size,
         )
 
@@ -258,12 +259,6 @@ if __name__ == '__main__':
         "--use_slow_tokenizer",
         action="store_true",
         help="If given, we will use the slow tokenizer."
-    )
-    parser.add_argument(
-        "--openai_engine",
-        type=str,
-        default=None,
-        help="If specified, we will evaluate the OpenAI engine."
     )
     parser.add_argument(
         "--data_dir",
@@ -297,12 +292,12 @@ if __name__ == '__main__':
     parser.add_argument(
         "--base_model_name_or_path",
         type=str,
-        default=None,
+        default='meta-llama/Llama-2-13b-hf',
     )
     parser.add_argument(
         "--expert_model_name_or_path",
         type=str,
-        default=None,
+        default='models/llama2-triviaqa-7b',
     )
     parser.add_argument(
         "--system_prompt",

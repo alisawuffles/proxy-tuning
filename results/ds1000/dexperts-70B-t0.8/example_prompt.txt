@@ -1,0 +1,7 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# draw a full line from (0,0) to (1,2)
+# SOLUTION START

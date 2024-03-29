@@ -10,8 +10,6 @@ from transformers import (
     SuppressTokensAtBeginLogitsProcessor
 )
 
-from open_instruct.finetune import encode_with_prompt_completion_format
-
 
 def ensure_dir(d):
     if not os.path.exists(d):
@@ -60,12 +58,17 @@ def generate_completions(
         tokenized_prompts = tokenizer(
             batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=add_special_tokens
         )
-        batch_input_ids = tokenized_prompts.input_ids
-        attention_mask = tokenized_prompts.attention_mask
+        batch_input_ids = tokenized_prompts['input_ids']
+        attention_mask = tokenized_prompts['attention_mask']
 
         if model.device.type == "cuda":
-            batch_input_ids = batch_input_ids.cuda()
-            attention_mask = attention_mask.cuda()
+            if isinstance(batch_input_ids, dict):
+                for k in batch_input_ids:
+                    batch_input_ids[k] = batch_input_ids[k].cuda()
+                    attention_mask[k] = attention_mask[k].cuda()
+            else:
+                batch_input_ids = batch_input_ids.cuda()
+                attention_mask = attention_mask.cuda()
 
         stopping_criteria = StoppingCriteriaList([KeyWordsCriteria(stop_id_sequences)]) if stop_id_sequences else None
 
@@ -94,6 +97,10 @@ def generate_completions(
             **generation_kwargs
         )
 
+        # to support the logits processing below when using DExperts with mixed tokenizers
+        if isinstance(batch_input_ids, dict):
+            batch_input_ids = batch_input_ids['llama']
+
         # the stopping criteria is applied at batch level, so if other examples are not stopped,
         # the entire batch will continue to generate. so some outputs still have the stop sequence,
         # which we need to remove.
@@ -105,8 +112,8 @@ def generate_completions(
                         break
 
         # remove the prompt from the output
-        # we need to re-encode the prompt because we need to make sure the special tokens are treated 
-        # the same way as in the outputs. we changed our previous way of truncating the output token ids 
+        # we need to re-encode the prompt because we need to make sure the special tokens are treated
+        # the same way as in the outputs. we changed our previous way of truncating the output token ids
         # directly because some tokenizer (e.g., llama) won't add space token before the first token.
         # space is important for some tasks (e.g., code completion).
         batch_outputs = tokenizer.batch_decode(batch_outputs, skip_special_tokens=True)
@@ -127,96 +134,7 @@ def generate_completions(
     return generations
 
 
-@torch.inference_mode()
-def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=None, batch_size=1, return_token_predictions=False, add_special_tokens=True, disable_tqdm=False):
-    predictions, probs = [], []
-    if not disable_tqdm:
-        progress = tqdm.tqdm(total=len(prompts), desc="Getting Predictions")
-
-    for i in range(0, len(prompts), batch_size):
-        batch_prompts = prompts[i: i+batch_size]
-        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=add_special_tokens)
-        batch_input_ids = tokenized_prompts.input_ids
-        attention_mask = tokenized_prompts.attention_mask
-
-        if model.device.type == "cuda":
-            batch_input_ids = batch_input_ids.cuda()
-            attention_mask = attention_mask.cuda()
-
-        batch_logits = model(input_ids=batch_input_ids, attention_mask=attention_mask).logits[:, -1, :]
-        batch_probs = torch.softmax(batch_logits, dim=-1)
-        if candidate_token_ids is not None:
-            batch_probs = batch_probs[:, candidate_token_ids]
-        batch_prediction_indices = torch.argmax(batch_probs, dim=-1)
-        if return_token_predictions:
-            if candidate_token_ids is not None:
-                candidate_tokens = tokenizer.convert_ids_to_tokens(candidate_token_ids)
-                batch_predictions = [candidate_tokens[idx] for idx in batch_prediction_indices]
-            else:
-                batch_predictions = tokenizer.convert_ids_to_tokens(batch_prediction_indices)
-            predictions += batch_predictions
-        else:
-            predictions += batch_prediction_indices.tolist()
-        probs += batch_probs.tolist()
-
-        if not disable_tqdm:
-            progress.update(len(batch_prompts))
-
-    assert len(predictions) == len(prompts), "number of predictions should be equal to number of prompts"
-    return predictions, probs
-
-
-@torch.inference_mode()
-def score_completions(model, tokenizer, scoring_examples, disable_tqdm=False):
-    '''
-    Each scoring example is a dict, which contains the following keys:
-    - prompt: the prompt to score
-    - completions: a list of completions to score
-    '''
-
-    if not disable_tqdm:
-        progress = tqdm.tqdm(total=len(scoring_examples), desc="Scoring Completions")
-
-    # unroll the scoring examples
-    unrolled_examples = []
-    for scoring_example in scoring_examples:
-        prompt = scoring_example["prompt"]
-        for completion in scoring_example["completions"]:
-            unrolled_examples.append({
-                "prompt": prompt,
-                "completion": completion
-            })
-
-    scores = []
-    # currently we don't support batching, because we want to directly use the loss returned by the model to score each completion.
-    for unrolled_example in unrolled_examples:
-        encoded_example = encode_with_prompt_completion_format(unrolled_example, tokenizer, max_seq_length=None)
-        # unsqueeze the batch dimension
-        for key, value in encoded_example.items():
-            encoded_example[key] = value.unsqueeze(0)
-        if model.device.type == "cuda":
-            encoded_example = {
-                key: value.cuda() for key, value in encoded_example.items()
-            }
-        outputs = model(**encoded_example)
-        loss = outputs.loss
-        scores.append(-loss.item())
-        if not disable_tqdm:
-            progress.update(1)
-
-    # roll up the scores
-    rolled_up_scores = {}
-    for unrolled_example, score in zip(unrolled_examples, scores):
-        prompt = unrolled_example["prompt"]
-        completion = unrolled_example["completion"]
-        if prompt not in rolled_up_scores:
-            rolled_up_scores[prompt] = {}
-        rolled_up_scores[prompt][completion] = score
-
-    return rolled_up_scores
-
-
-def load_hf_lm_and_tokenizer(
+def load_lm_and_tokenizer(
     model_name_or_path,
     tokenizer_name_or_path=None,
     device_map="auto",
@@ -226,7 +144,7 @@ def load_hf_lm_and_tokenizer(
     padding_side="left",
 ):
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer, OPTForCausalLM, GPTNeoXForCausalLM
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     model_kwargs = {
         'device_map': device_map,
@@ -244,51 +162,33 @@ def load_hf_lm_and_tokenizer(
         tokenizer_name_or_path = model_name_or_path
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path, use_fast=use_fast_tokenizer)
+    tokenizer = add_pad_token(tokenizer, padding_side)
 
-    # set padding side to left for batch generation
-    tokenizer.padding_side = padding_side
+    return model, tokenizer
 
-    # set pad token to eos token if pad token is not set (as is the case for llama models)
+
+def add_pad_token(tokenizer, padding_side="left"):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
-
-    # for OPT and Pythia models, we need to set tokenizer.model_max_length to model.config.max_position_embeddings
-    # to avoid wrong embedding index.
-    if isinstance(model, GPTNeoXForCausalLM) or isinstance(model, OPTForCausalLM):
-        tokenizer.model_max_length = model.config.max_position_embeddings
-        print("Set tokenizer.model_max_length to model.config.max_position_embeddings: {}".format(model.config.max_position_embeddings))
-
-    return model, tokenizer
+    tokenizer.padding_side = padding_side
+    return tokenizer
 
 
 def load_dexperts_model_and_tokenizer(
     base_model_name_or_path: str,
     expert_model_name_or_path: str,
+    antiexpert_model_name_or_path: str = None,
     device_map: str = "auto",
     system_prompt: str = None,
     alpha: float = 1.0,
     chat_response_prefix: str = None,
     load_in_8bit: bool = False,
     use_fast_tokenizer: bool = True,
-    tokenizer_name_or_path: str = None,
     padding_side: str = "left",
 ):
-    from modeling.dexperts import DExpertsLlama
     from transformers import AutoTokenizer
-
-    if not tokenizer_name_or_path:
-        tokenizer_name_or_path = base_model_name_or_path
-
-    tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path, use_fast_tokenizer=use_fast_tokenizer)
-
-    # set padding side to left for batch generation
-    tokenizer.padding_side = padding_side
-
-    # set pad token to eos token if pad token is not set (as is the case for llama models)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.pad_token_id = tokenizer.eos_token_id
+    from modeling.dexperts import DExpertsLlama
 
     model_kwargs = {
         'device_map': device_map,
@@ -298,10 +198,15 @@ def load_dexperts_model_and_tokenizer(
         'load_in_8bit': load_in_8bit,
     }
 
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path, use_fast_tokenizer=use_fast_tokenizer)
+    tokenizer = add_pad_token(tokenizer, padding_side)
+    if not antiexpert_model_name_or_path:
+        antiexpert_model_name_or_path = 'meta-llama/Llama-2-7b-hf'
+
     model = DExpertsLlama(
         base_model_name_or_path=base_model_name_or_path,
         expert_model_name_or_path=expert_model_name_or_path,
-        antiexpert_model_name_or_path='meta-llama/Llama-2-7b-hf',
+        antiexpert_model_name_or_path=antiexpert_model_name_or_path,
         tokenizer=tokenizer,
         system_prompt=system_prompt,
         alpha=alpha,

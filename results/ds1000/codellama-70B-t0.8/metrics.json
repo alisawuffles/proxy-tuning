@@ -1,0 +1,18 @@
+{
+    "by_lib": {
+        "pandas_pass@10": 0.5330282298618916,
+        "numpy_pass@10": 0.6724973848171009,
+        "matplotlib_pass@10": 0.8285680630270821,
+        "tensorflow_pass@10": 0.4999597066160534,
+        "scipy_pass@10": 0.748706401957176,
+        "sklearn_pass@10": 0.7251931336936049,
+        "pytorch_pass@10": 0.7655759488189828
+    },
+    "pass@10": 0.6763977083288227,
+    "by_perturbation_type": {
+        "origin": 0.4192307692307693,
+        "surface": 0.3,
+        "semantic": 0.2833333333333334,
+        "difficult-rewrite": 0.20416666666666666
+    }
+}
