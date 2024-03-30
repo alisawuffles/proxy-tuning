@@ -1,16 +1,3 @@
-#!/bin/bash
-#SBATCH --partition=gpu-a100
-#SBATCH --account=xlab
-#SBATCH --mem-per-gpu=32G
-#SBATCH --cpus-per-gpu=5
-#SBATCH --gres=gpu:8
-#SBATCH --time=14-00:00:00
-#SBATCH --job-name=lora
-#SBATCH --output="slurm/train/slurm-%J-%x.out"
-
-cat $0
-echo "--------------------"
-
 MODEL_SIZE=13
 MODEL_NAME=models/llama2-gsm-${MODEL_SIZE}b-lora
 TRAIN_FILE=data/domains/gsm/train.jsonl
